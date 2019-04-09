@@ -1,13 +1,13 @@
 package edu.buffalo.cse.cse486586.simpledht;
 
 import java.io.BufferedReader;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -24,14 +24,30 @@ import android.util.Log;
 
 public class SimpleDhtProvider extends ContentProvider {
     static final String TAG = SimpleDhtProvider.class.getSimpleName();
-    String myPortNumber ;
-    int predecessor= -1,successor = -1,noOfEntries = 0;
+    int myPort, predecessorPort = -1,successorPort = -1;
+    String myPortHash, predecessorPortHash, successorPortHash;
     static final int SERVER_PORT = 10000;
+    static final int MAIN_AVD_PORT = 11108;
 
     @Override
     public int delete(Uri uri, String selection, String[] selectionArgs) {
         // TODO Auto-generated method stub
+        // TODO Handle cases when there are only single node or 2 nodes
+        String key,value;
+        Log.e(TAG, "Inside Content Provider Insert");
+        handleDeleteMsg(selection);
         return 0;
+    }
+
+    private void handleDeleteMsg(String selection) {
+    }
+
+    @Override
+    public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs,
+                        String sortOrder) {
+        // TODO Auto-generated method stub
+        // TODO Handle cases when there are only single node or 2 nodes
+        return null;
     }
 
     @Override
@@ -43,7 +59,16 @@ public class SimpleDhtProvider extends ContentProvider {
     @Override
     public Uri insert(Uri uri, ContentValues values) {
         // TODO Auto-generated method stub
-        return null;
+        // Insert Request from Tester or Grader will be received here
+        // TODO Handle cases when there are only single node or 2 nodes
+        String key,value;
+        Log.e(TAG, "Inside Content Provider Insert");
+        key = (String)values.get("key");
+        value = (String)values.get("value");
+        Log.e(TAG, "Received Key = " + key + " Value=" + value);
+        handleInsertMsg(key,value);
+
+        return uri;
     }
 
     @Override
@@ -53,8 +78,13 @@ public class SimpleDhtProvider extends ContentProvider {
         Log.e(TAG,"Inside OnCreate()");
         TelephonyManager tel = (TelephonyManager) getContext().getSystemService(Context.TELEPHONY_SERVICE);
         String portStr = tel.getLine1Number().substring(tel.getLine1Number().length() - 4);
-        myPortNumber = String.valueOf((Integer.parseInt(portStr) * 2));
-        Log.e(TAG,"My Port Number"+myPortNumber);
+        myPort = (Integer.parseInt(portStr) * 2);
+        try {
+            myPortHash = genHash(String.valueOf(myPort));
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        }
+        Log.e(TAG,"My Port Number"+ myPort);
         //create server sockets to continuously listen from other nodes
         try {
             /*
@@ -80,18 +110,18 @@ public class SimpleDhtProvider extends ContentProvider {
         }
 
         // Join Ring
-        if(myPortNumber.equals("11108"))
+        if(myPort == MAIN_AVD_PORT)
         {
-            predecessor = -1;
-            successor= -1;
-            Log.e(TAG, "I am "+myPortNumber+ " My Predecessor = " +predecessor +" Successor = " + successor);
+            predecessorPort = -1;
+            successorPort= -1;
+            Log.e(TAG, "I am "+ myPort + " My Predecessor = " + predecessorPort +" Successor = " + successorPort);
         }
         else
         {
             //find correct position
-            String msg = "0" + myPortNumber;
-                new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,msg);
-            Log.e(TAG, "I am "+myPortNumber+ " My Predecessor = " +predecessor +" Successor = " + successor);
+            String msg = "0" + myPort;
+            new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,msg);
+            Log.e(TAG, "I am "+ myPort + " My Predecessor = " + predecessorPort +" Successor = " + successorPort);
 
         }
 
@@ -99,17 +129,55 @@ public class SimpleDhtProvider extends ContentProvider {
     }
 
     @Override
-    public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs,
-            String sortOrder) {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    @Override
     public int update(Uri uri, ContentValues values, String selection, String[] selectionArgs) {
         // TODO Auto-generated method stub
         return 0;
     }
+
+
+    boolean isBelongTO(String idHash)
+    {
+        if((idHash.compareTo(predecessorPortHash) == 1 && idHash.compareTo(myPortHash) != 1)
+                || (((predecessorPortHash.compareTo(myPortHash))) == 1) && (idHash.compareTo(predecessorPortHash) == 1 || idHash.compareTo(myPortHash)== -1))
+            return true;
+        else return false;
+    }
+
+    private void handleInsertMsg(String key, String value) {
+        if(isBelongTO(key))
+        {
+            FileOutputStream outputStream;
+
+            try {
+                outputStream = getContext().openFileOutput(key, Context.MODE_PRIVATE);
+                Log.v("GroupMessengerActivity", "Opened File");
+                outputStream.write(value.getBytes());
+                Log.v("GroupMessengerActivity", "Written on File");
+                outputStream.close();
+            } catch (Exception e) {
+                Log.v("GroupMessengerActivity", "Exception in Writing onto Disk");
+            }
+            Log.v("GroupMessengerActivity", "Insertion Successful");
+
+        }
+        else
+        {
+            Log.e(TAG, "Still not found position..Forwarding Req to Successor");
+            Socket socket = null;
+            try {
+                socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                        successorPort);
+                BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                PrintWriter pw = null;
+                pw = new PrintWriter(socket.getOutputStream(), true);
+                String msg = "1" + key + value;
+                pw.println(msg);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
 
     private String genHash(String input) throws NoSuchAlgorithmException {
         MessageDigest sha1 = MessageDigest.getInstance("SHA-1");
@@ -144,13 +212,22 @@ public class SimpleDhtProvider extends ContentProvider {
                         //join msg
                         Log.e(TAG, "Serving Join Request");
                         int id = Integer.parseInt(msg.substring(1,6));
-
-                        if(id <= Integer.parseInt(myPortNumber))
+                        String idHash = genHash(id+"");
+                        if(successorPort == -1)
+                        {
+                            //2 nd node is getting added;
+                            successorPort = id;
+                            successorPortHash = genHash(String.valueOf(successorPort));
+                            predecessorPort = id;
+                            predecessorPortHash = genHash(String.valueOf(predecessorPort));
+                            reply = String.valueOf(myPort) + myPort;
+                        }
+                        else if(isBelongTO(idHash))
                         {
                             Log.e(TAG, "Found Position");
-                        int oldpred = predecessor;
-                        predecessor = Integer.parseInt(id);
-                        reply = oldpred + myPortNumber;
+                        int oldpred = predecessorPort;
+                        predecessorPort = id;
+                        reply = oldpred + String.valueOf(myPort);
                         Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
                                     oldpred);
                         String msgToSend = "4" + id;
@@ -161,32 +238,21 @@ public class SimpleDhtProvider extends ContentProvider {
                         {
 
                             Log.e(TAG, "Still not found position..Forwarding Req to Successor");
-                            int server ;
-                            if(successor == -1)
-                            {
-                                //2 nd node is getting added;
-                                successor = id;
-                                predecessor = id;
-                                reply = myPortNumber + myPortNumber;
-                            }
-                            else
-                            {
                                 Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
-                                        successor);
+                                        successorPort);
                                 BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-
-                                String msgToSend = msg;
                                 PrintWriter pw = new PrintWriter(socket.getOutputStream(), true);
-                                pw.println(msgToSend);
+                                pw.println(msg);
                                 reply = in.readLine();
-                            }
-
                         }
                         pwMain.write(reply);
                     }
                     else if(msg.charAt(0) == '1')
                     {
+                        String key="",value = "";
+                        handleInsertMsg(key,value);
                         //insert msg
+
                     }
                     else if(msg.charAt(0) == '2')
                     {
@@ -199,8 +265,9 @@ public class SimpleDhtProvider extends ContentProvider {
                     else if(msg.charAt(0) == '4')
                     {
                         //Successor Change
-                        successor = Integer.parseInt(msg.substring(1,6));
-                        Log.e(TAG, "I am "+myPortNumber+ " My Predecessor = " +predecessor +" Successor = " + successor);
+                        successorPort = Integer.parseInt(msg.substring(1,6));
+                        successorPortHash = genHash(String.valueOf(successorPort));
+                        Log.e(TAG, "I am "+ myPort + " My Predecessor = " + predecessorPort +" Successor = " + successorPort);
                     }
                     else
                     Log.e(TAG,"Wrong Message");
@@ -209,12 +276,14 @@ public class SimpleDhtProvider extends ContentProvider {
                 }
             }catch (IOException e) {
                 e.printStackTrace();
+            } catch (NoSuchAlgorithmException e) {
+                e.printStackTrace();
             }
 
             return null;
         }
-
     }
+
 
     private class ClientTask extends AsyncTask<String, Void, Void> {
 
@@ -222,22 +291,26 @@ public class SimpleDhtProvider extends ContentProvider {
         protected Void doInBackground(String... msgs) {
             try {
             Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
-                    11108);
+                    MAIN_AVD_PORT);
             BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             String inputLine;
             PrintWriter pw = new PrintWriter(socket.getOutputStream(), true);
             pw.println(msgs[0]);
             String reply = in.readLine();
-            predecessor = Integer.parseInt(reply.substring(0,5));
-            successor = Integer.parseInt(reply.substring(5,10));
-            Log.e(TAG, "I am "+myPortNumber+ " My Predecessor = " +predecessor +" Successor = " + successor);
+            predecessorPort = Integer.parseInt(reply.substring(0,5));
+            predecessorPortHash = genHash(String.valueOf(predecessorPort));
+            successorPort = Integer.parseInt(reply.substring(5,10));
+            successorPortHash = genHash(String.valueOf(successorPort));
+            Log.e(TAG, "I am "+ myPort + " My Predecessor = " + predecessorPort +" Successor = " + successorPort);
 
         } catch (UnknownHostException e) {
                 Log.e(TAG, "ClientTask UnknownHostException");
             } catch (IOException e) {
                 Log.e(TAG, "ClientTask socket IOException");
+            } catch (NoSuchAlgorithmException e) {
+                e.printStackTrace();
             }
-      //      sendActualMsg(msgs[0]);
+            //      sendActualMsg(msgs[0]);
             return null;
         }
     }
