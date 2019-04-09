@@ -114,18 +114,18 @@ public class SimpleDhtProvider extends ContentProvider {
         {
             predecessorPort = -1;
             successorPort= -1;
-            Log.e(TAG, "I am "+ myPort + " My Predecessor = " + predecessorPort +" Successor = " + successorPort);
+            Log.e(TAG, "I am "+ myPort +  "With Hash Value =" + myPortHash );
         }
         else
         {
             //find correct position
             String msg = "0" + myPort;
+            Log.e(TAG, "My Port is " + myPort + "With Hash Value =" + myPortHash + "Sending Join Request to Avd0");
             new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,msg);
-            Log.e(TAG, "I am "+ myPort + " My Predecessor = " + predecessorPort +" Successor = " + successorPort);
 
         }
 
-        return false;
+        return true;
     }
 
     @Override
@@ -137,8 +137,9 @@ public class SimpleDhtProvider extends ContentProvider {
 
     boolean isBelongTO(String idHash)
     {
-        if((idHash.compareTo(predecessorPortHash) == 1 && idHash.compareTo(myPortHash) != 1)
-                || (((predecessorPortHash.compareTo(myPortHash))) == 1) && (idHash.compareTo(predecessorPortHash) == 1 || idHash.compareTo(myPortHash)== -1))
+        Log.e(TAG,"New Node Hash = " + idHash + " My Hash =" + myPortHash+ " predcessorHash =" + predecessorPortHash + " SuccessorHash =" + successorPortHash);
+        if((idHash.compareTo(predecessorPortHash) > 0 && idHash.compareTo(myPortHash) < 1)
+                || (((predecessorPortHash.compareTo(myPortHash))) > 0 ) && (idHash.compareTo(predecessorPortHash) >0 || idHash.compareTo(myPortHash) < 1))
             return true;
         else return false;
     }
@@ -200,9 +201,10 @@ public class SimpleDhtProvider extends ContentProvider {
                     Socket client = null;
 
                     client = serverSocket.accept();
+                    Log.e(TAG, "Server Accepted Request");
                     BufferedReader br = new BufferedReader(new InputStreamReader(client.getInputStream()));
                     String msg;
-                    PrintWriter pwMain = new PrintWriter(client.getOutputStream(), true);
+
                    // pw.println(msgToSend);
                     // Log.e(TAG, "Before Reading");
                     msg = br.readLine();
@@ -221,6 +223,7 @@ public class SimpleDhtProvider extends ContentProvider {
                             predecessorPort = id;
                             predecessorPortHash = genHash(String.valueOf(predecessorPort));
                             reply = String.valueOf(myPort) + myPort;
+                            Log.e(TAG, "Sending reply" + reply);
                         }
                         else if(isBelongTO(idHash))
                         {
@@ -237,15 +240,21 @@ public class SimpleDhtProvider extends ContentProvider {
                         else
                         {
 
-                            Log.e(TAG, "Still not found position..Forwarding Req to Successor");
+                            Log.e(TAG, "Still not found position..Forwarding Req to Successor" + successorPort);
+
                                 Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
                                         successorPort);
                                 BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
                                 PrintWriter pw = new PrintWriter(socket.getOutputStream(), true);
                                 pw.println(msg);
-                                reply = in.readLine();
+
+
+                            reply = in.readLine();
+                            Log.e(TAG, "Received Reply from " + successorPort + " "+  reply);
                         }
-                        pwMain.write(reply);
+                        Log.e(TAG, "Sending reply" + reply);
+                        PrintWriter pwMain = new PrintWriter(client.getOutputStream(), true);
+                        pwMain.println(reply);
                     }
                     else if(msg.charAt(0) == '1')
                     {
@@ -272,7 +281,6 @@ public class SimpleDhtProvider extends ContentProvider {
                     else
                     Log.e(TAG,"Wrong Message");
 
-
                 }
             }catch (IOException e) {
                 e.printStackTrace();
@@ -296,10 +304,11 @@ public class SimpleDhtProvider extends ContentProvider {
             String inputLine;
             PrintWriter pw = new PrintWriter(socket.getOutputStream(), true);
             pw.println(msgs[0]);
-            String reply = in.readLine();
-            predecessorPort = Integer.parseInt(reply.substring(0,5));
+            inputLine= in.readLine();
+            Log.e(TAG,"Received Reply :" + inputLine);
+            predecessorPort = Integer.parseInt(inputLine.substring(0,5));
             predecessorPortHash = genHash(String.valueOf(predecessorPort));
-            successorPort = Integer.parseInt(reply.substring(5,10));
+            successorPort = Integer.parseInt(inputLine.substring(5,10));
             successorPortHash = genHash(String.valueOf(successorPort));
             Log.e(TAG, "I am "+ myPort + " My Predecessor = " + predecessorPort +" Successor = " + successorPort);
 
