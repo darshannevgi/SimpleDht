@@ -1,6 +1,8 @@
 package edu.buffalo.cse.cse486586.simpledht;
 
 import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -17,6 +19,7 @@ import android.content.ContentProvider;
 import android.content.ContentValues;
 import android.content.Context;
 import android.database.Cursor;
+import android.database.MatrixCursor;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.telephony.TelephonyManager;
@@ -42,12 +45,55 @@ public class SimpleDhtProvider extends ContentProvider {
     private void handleDeleteMsg(String selection) {
     }
 
+    void traverseAllFiles()
+    {
+        File file = getContext().getFilesDir();
+        File[] files = file.listFiles();
+        for (int i = 0; i < files.length; i++){
+            if (files[i].isFile()){
+                Log.e(TAG,files[i].getName());
+            }
+        }
+    }
+
+    private  Cursor readFromDataStore()
+    {
+        File file = getContext().getFilesDir();
+        File[] files = file.listFiles();
+        FileInputStream inputStream;
+        StringBuffer sb = new StringBuffer();
+        MatrixCursor cursor = new MatrixCursor(new String[]{"key", "value"});
+        for (int i = 0; i < files.length; i++) {
+            try {
+                inputStream = getContext().openFileInput(files[i].getName());
+
+                int i;
+                while ((i = inputStream.read()) != -1) {
+                    sb.append((char) i);
+                }
+                inputStream.close();
+            } catch (Exception e) {
+            }
+            String value = sb.toString();
+            cursor.newRow().add(files[i].getName()).add(value);
+            sb.setLength(0);
+        }
+        return cursor;
+    }
     @Override
     public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs,
                         String sortOrder) {
         // TODO Auto-generated method stub
         // TODO Handle cases when there are only single node or 2 nodes
+        if(selection.contains("@"))
+            return readFromDataStore();
+        else if(selection.contains("*"))
+            return readFromAllDataStore();
+        else
         return null;
+    }
+
+    private Cursor readFromAllDataStore() {
     }
 
     @Override
@@ -84,7 +130,7 @@ public class SimpleDhtProvider extends ContentProvider {
         } catch (NoSuchAlgorithmException e) {
             e.printStackTrace();
         }
-        Log.e(TAG,"My Port Number"+ myPort);
+        //Log.e(TAG,"My Port Number"+ myPort);
         //create server sockets to continuously listen from other nodes
         try {
             /*
@@ -137,7 +183,7 @@ public class SimpleDhtProvider extends ContentProvider {
 
     boolean isBelongTO(String idHash)
     {
-        Log.e(TAG,"New Node Hash = " + idHash + " My Hash =" + myPortHash+ " predcessorHash =" + predecessorPortHash + " SuccessorHash =" + successorPortHash);
+        //Log.e(TAG,"New Node Hash = " + idHash + " My Hash =" + myPortHash+ " predcessorHash =" + predecessorPortHash + " SuccessorHash =" + successorPortHash);
         if((idHash.compareTo(predecessorPortHash) > 0 && idHash.compareTo(myPortHash) < 1)
                 || (((predecessorPortHash.compareTo(myPortHash))) > 0 ) && (idHash.compareTo(predecessorPortHash) >0 || idHash.compareTo(myPortHash) < 1))
             return true;
@@ -163,7 +209,7 @@ public class SimpleDhtProvider extends ContentProvider {
         }
         else
         {
-            Log.e(TAG, "Still not found position..Forwarding Req to Successor");
+            //Log.e(TAG, "Still not found position..Forwarding Req to Successor");
             Socket socket = null;
             try {
                 socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
@@ -171,7 +217,7 @@ public class SimpleDhtProvider extends ContentProvider {
                 BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
                 PrintWriter pw = null;
                 pw = new PrintWriter(socket.getOutputStream(), true);
-                String msg = "1" + key + value;
+                String msg = "1" + key.length()+ key+ value.length()+ value;
                 pw.println(msg);
             } catch (IOException e) {
                 e.printStackTrace();
@@ -201,7 +247,7 @@ public class SimpleDhtProvider extends ContentProvider {
                     Socket client = null;
 
                     client = serverSocket.accept();
-                    Log.e(TAG, "Server Accepted Request");
+                    //Log.e(TAG, "Server Accepted Request");
                     BufferedReader br = new BufferedReader(new InputStreamReader(client.getInputStream()));
                     String msg;
 
@@ -212,7 +258,7 @@ public class SimpleDhtProvider extends ContentProvider {
                     if(msg.charAt(0) == '0')
                     {
                         //join msg
-                        Log.e(TAG, "Serving Join Request");
+                       // Log.e(TAG, "Serving Join Request");
                         int id = Integer.parseInt(msg.substring(1,6));
                         String idHash = genHash(id+"");
                         if(successorPort == -1)
@@ -223,11 +269,11 @@ public class SimpleDhtProvider extends ContentProvider {
                             predecessorPort = id;
                             predecessorPortHash = genHash(String.valueOf(predecessorPort));
                             reply = String.valueOf(myPort) + myPort;
-                            Log.e(TAG, "Sending reply" + reply);
+                           // Log.e(TAG, "Sending reply" + reply);
                         }
                         else if(isBelongTO(idHash))
                         {
-                            Log.e(TAG, "Found Position");
+                           // Log.e(TAG, "Found Position");
                         int oldpred = predecessorPort;
                         predecessorPort = id;
                         reply = oldpred + String.valueOf(myPort);
@@ -240,7 +286,7 @@ public class SimpleDhtProvider extends ContentProvider {
                         else
                         {
 
-                            Log.e(TAG, "Still not found position..Forwarding Req to Successor" + successorPort);
+                            //Log.e(TAG, "Still not found position..Forwarding Req to Successor" + successorPort);
 
                                 Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
                                         successorPort);
@@ -250,15 +296,18 @@ public class SimpleDhtProvider extends ContentProvider {
 
 
                             reply = in.readLine();
-                            Log.e(TAG, "Received Reply from " + successorPort + " "+  reply);
+                          //  Log.e(TAG, "Received Reply from " + successorPort + " "+  reply);
                         }
-                        Log.e(TAG, "Sending reply" + reply);
+                        //Log.e(TAG, "Sending reply" + reply);
                         PrintWriter pwMain = new PrintWriter(client.getOutputStream(), true);
                         pwMain.println(reply);
                     }
                     else if(msg.charAt(0) == '1')
                     {
-                        String key="",value = "";
+                        int keylengthIndex = 1,keySize = Character.getNumericValue(msg.charAt(keylengthIndex)), keyStartIndex = keylengthIndex + 1, vallengthIndex = keyStartIndex+keySize;
+                        int valSize = Character.getNumericValue(msg.charAt(vallengthIndex)),valStartIndex = vallengthIndex+1;
+                        String key= msg.substring(keyStartIndex,keyStartIndex + keySize),value = msg.substring(valStartIndex, valStartIndex + valSize);
+
                         handleInsertMsg(key,value);
                         //insert msg
 
