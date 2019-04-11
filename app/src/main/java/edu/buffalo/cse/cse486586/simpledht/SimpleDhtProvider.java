@@ -45,27 +45,17 @@ public class SimpleDhtProvider extends ContentProvider {
     private void handleDeleteMsg(String selection) {
     }
 
-    void traverseAllFiles()
-    {
-        File file = getContext().getFilesDir();
-        File[] files = file.listFiles();
-        for (int i = 0; i < files.length; i++){
-            if (files[i].isFile()){
-                Log.e(TAG,files[i].getName());
-            }
-        }
-    }
-
-    private  Cursor readFromDataStore()
+    private  String readFromDataStore()
     {
         File file = getContext().getFilesDir();
         File[] files = file.listFiles();
         FileInputStream inputStream;
         StringBuffer sb = new StringBuffer();
+        StringBuffer sbMain = new StringBuffer();
         MatrixCursor cursor = new MatrixCursor(new String[]{"key", "value"});
-        for (int i = 0; i < files.length; i++) {
+        for (int j = 0; j < files.length; j++) {
             try {
-                inputStream = getContext().openFileInput(files[i].getName());
+                inputStream = getContext().openFileInput(files[j].getName());
 
                 int i;
                 while ((i = inputStream.read()) != -1) {
@@ -75,10 +65,11 @@ public class SimpleDhtProvider extends ContentProvider {
             } catch (Exception e) {
             }
             String value = sb.toString();
-            cursor.newRow().add(files[i].getName()).add(value);
+            sbMain.append(value);
+            //cursor.newRow().add(files[j].getName()).add(value);
             sb.setLength(0);
         }
-        return cursor;
+        return sbMain.toString();
     }
     @Override
     public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs,
@@ -86,14 +77,103 @@ public class SimpleDhtProvider extends ContentProvider {
         // TODO Auto-generated method stub
         // TODO Handle cases when there are only single node or 2 nodes
         if(selection.contains("@"))
-            return readFromDataStore();
+            return stringToCursor(readFromDataStore());
         else if(selection.contains("*"))
-            return readFromAllDataStore();
+        {
+            MatrixCursor cursor = (MatrixCursor)stringToCursor(readFromDataStore());
+            String msg  = readFromAllDataStore(1+"*"+myPort);
+            int keylengthIndex = 1;
+            for (; keylengthIndex < msg.length(); ) {
+
+                int keySize = Character.getNumericValue(msg.charAt(keylengthIndex)), keyStartIndex = keylengthIndex + 1, vallengthIndex = keyStartIndex+keySize;
+                int valSize = Character.getNumericValue(msg.charAt(vallengthIndex)),valStartIndex = vallengthIndex+1;
+                String key= msg.substring(keyStartIndex,keyStartIndex + keySize),value = msg.substring(valStartIndex, valStartIndex + valSize);
+                cursor.newRow().add(key).add(value);
+            }
+            return cursor;
+        }
         else
+        return stringToCursor(findDataItem(selection));
+    }
+
+    private String findDataItem(String key) {
+        StringBuffer sb = new StringBuffer();
+        try {
+            if(isBelongTO(genHash(key))) {
+                MatrixCursor cursor = new MatrixCursor(new String[]{"key", "value"});
+                try {
+                    FileInputStream inputStream;
+                    inputStream = getContext().openFileInput(key);
+                    int i;
+                    while ((i = inputStream.read()) != -1) {
+                        sb.append((char) i);
+                    }
+                    inputStream.close();
+                } catch (Exception e) {
+                }
+                return sb.toString();
+            }
+            else
+            {
+                //Log.e(TAG, "Still not found position..Forwarding Req to Successor");
+                Socket socket = null;
+                try {
+                    socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                            successorPort);
+                    BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                    PrintWriter pw = null;
+                    pw = new PrintWriter(socket.getOutputStream(), true);
+                    String msg = "2" + key.length()+ key;
+                    pw.println(msg);
+                    String reply = in.readLine();
+                    return reply;
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        }
         return null;
     }
 
-    private Cursor readFromAllDataStore() {
+
+    private Cursor stringToCursor(String msg)
+    {
+        MatrixCursor cursor = new MatrixCursor(new String[]{"key", "value"});
+        int keylengthIndex = 1;
+        for (; keylengthIndex < msg.length(); ) {
+
+             int keySize = Character.getNumericValue(msg.charAt(keylengthIndex)), keyStartIndex = keylengthIndex + 1, vallengthIndex = keyStartIndex+keySize;
+            int valSize = Character.getNumericValue(msg.charAt(vallengthIndex)),valStartIndex = vallengthIndex+1;
+            String key= msg.substring(keyStartIndex,keyStartIndex + keySize),value = msg.substring(valStartIndex, valStartIndex + valSize);
+            cursor.newRow().add(key).add(value);
+        }
+        return cursor;
+    }
+
+    private String readFromAllDataStore(String msg) {
+        //Log.e(TAG, "Still not found position..Forwarding Req to Successor");
+        int receiverPort = Integer.parseInt(msg.substring(2,7));
+        String reply = "";
+        if(successorPort != receiverPort)
+        {
+            Socket socket = null;
+            try {
+                socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                        successorPort);
+                BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                PrintWriter pw = null;
+                pw = new PrintWriter(socket.getOutputStream(), true);
+                pw.println(msg);
+                reply = in.readLine();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+        String localdataStore = readFromDataStore();
+
+        return localdataStore+reply;
     }
 
     @Override
@@ -168,9 +248,7 @@ public class SimpleDhtProvider extends ContentProvider {
             String msg = "0" + myPort;
             Log.e(TAG, "My Port is " + myPort + "With Hash Value =" + myPortHash + "Sending Join Request to Avd0");
             new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,msg);
-
         }
-
         return true;
     }
 
@@ -191,40 +269,43 @@ public class SimpleDhtProvider extends ContentProvider {
     }
 
     private void handleInsertMsg(String key, String value) {
-        if(isBelongTO(key))
-        {
-            FileOutputStream outputStream;
+        try {
+            if(isBelongTO(genHash(key)))
+            {
+                FileOutputStream outputStream;
 
-            try {
-                outputStream = getContext().openFileOutput(key, Context.MODE_PRIVATE);
-                Log.v("GroupMessengerActivity", "Opened File");
-                outputStream.write(value.getBytes());
-                Log.v("GroupMessengerActivity", "Written on File");
-                outputStream.close();
-            } catch (Exception e) {
-                Log.v("GroupMessengerActivity", "Exception in Writing onto Disk");
-            }
-            Log.v("GroupMessengerActivity", "Insertion Successful");
+                try {
+                    outputStream = getContext().openFileOutput(key, Context.MODE_PRIVATE);
+                    Log.v("GroupMessengerActivity", "Opened File");
+                    outputStream.write(value.getBytes());
+                    Log.v("GroupMessengerActivity", "Written on File");
+                    outputStream.close();
+                } catch (Exception e) {
+                    Log.v("GroupMessengerActivity", "Exception in Writing onto Disk");
+                }
+                Log.v("GroupMessengerActivity", "Insertion Successful");
 
-        }
-        else
-        {
-            //Log.e(TAG, "Still not found position..Forwarding Req to Successor");
-            Socket socket = null;
-            try {
-                socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
-                        successorPort);
-                BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-                PrintWriter pw = null;
-                pw = new PrintWriter(socket.getOutputStream(), true);
-                String msg = "1" + key.length()+ key+ value.length()+ value;
-                pw.println(msg);
-            } catch (IOException e) {
-                e.printStackTrace();
             }
+            else
+            {
+                //Log.e(TAG, "Still not found position..Forwarding Req to Successor");
+                Socket socket = null;
+                try {
+                    socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                            successorPort);
+                    BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                    PrintWriter pw = null;
+                    pw = new PrintWriter(socket.getOutputStream(), true);
+                    String msg = "1" + key.length()+ key+ value.length()+ value;
+                    pw.println(msg);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
         }
     }
-
 
     private String genHash(String input) throws NoSuchAlgorithmException {
         MessageDigest sha1 = MessageDigest.getInstance("SHA-1");
@@ -285,9 +366,6 @@ public class SimpleDhtProvider extends ContentProvider {
                         }
                         else
                         {
-
-                            //Log.e(TAG, "Still not found position..Forwarding Req to Successor" + successorPort);
-
                                 Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
                                         successorPort);
                                 BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
@@ -314,6 +392,20 @@ public class SimpleDhtProvider extends ContentProvider {
                     }
                     else if(msg.charAt(0) == '2')
                     {
+                        if(msg.charAt(1) == '*')
+                        {
+                            reply = readFromAllDataStore(msg);
+                            PrintWriter pwMain = new PrintWriter(client.getOutputStream(), true);
+                            pwMain.println(reply);
+                        }
+                        else
+                        {
+                            String key =  msg.substring(2,2+Character.getNumericValue(msg.charAt(1)));
+                            reply =findDataItem(key);
+                            PrintWriter pwMain = new PrintWriter(client.getOutputStream(), true);
+                            pwMain.println(reply);
+
+                        }
                         //query msg
                     }
                     else if(msg.charAt(0) == '3')
