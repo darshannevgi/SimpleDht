@@ -196,7 +196,6 @@ public class SimpleDhtProvider extends ContentProvider {
                     PrintWriter pw = null;
                     pw = new PrintWriter(socket.getOutputStream(), true);
                     pw.println(msg);
-                    reply = in.readLine();
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
@@ -222,7 +221,7 @@ public class SimpleDhtProvider extends ContentProvider {
         File file = getContext().getFilesDir();
         File[] files = file.listFiles();
         if(files.length == 0)
-            return "";
+            return null;
         FileInputStream inputStream;
         StringBuffer sb = new StringBuffer();
         StringBuffer sbMain = new StringBuffer();
@@ -259,12 +258,15 @@ public class SimpleDhtProvider extends ContentProvider {
                 try {
                     FileInputStream inputStream;
                     inputStream = getContext().openFileInput(key);
+                    if(inputStream == null)
+                        return null;
                     int i;
                     while ((i = inputStream.read()) != -1) {
                         sb.append((char) i);
                     }
                     inputStream.close();
                 } catch (Exception e) {
+                    return null;
                 }
                 sbMain.append(key + "_");
                 sbMain.append(sb);
@@ -303,7 +305,7 @@ public class SimpleDhtProvider extends ContentProvider {
         if(msg == null || msg.equals(""))
             return cursor;
         String [] split =  msg.split("_");
-        for (int i = 0; i < split.length;) {
+        for (int i = 0; (i+1) < split.length;) {
 
             /*int keySize = Character.getNumericValue(msg.charAt(keylengthIndex)), keyStartIndex = keylengthIndex + 1, vallengthIndex = keyStartIndex+keySize;
             int valSize = Character.getNumericValue(msg.charAt(vallengthIndex)),valStartIndex = vallengthIndex+1;
@@ -322,9 +324,10 @@ public class SimpleDhtProvider extends ContentProvider {
 
     private String readFromAllDataStore(String msg) {
         //Log.e(TAG, "Still not found position..Forwarding Req to Successor");
-        String reply = "";
+        String reply  = null;
         int receiverPort = Integer.parseInt(msg.substring(2,7));
         //Log.e(TAG, "Sending read Request to :" + successorPort + " From: " + myPort);
+        String localdataStore = readFromLocalDataStore();
         if(successorPort != -1 && successorPort != receiverPort)
         {
             Socket socket = null;
@@ -340,9 +343,11 @@ public class SimpleDhtProvider extends ContentProvider {
                 e.printStackTrace();
             }
         }
-        String localdataStore = readFromLocalDataStore();
-        if(reply != "")
+        String output;
+        if(reply != null && localdataStore != null)
             return localdataStore+ "_"+ reply;
+        else if(reply != null)
+            return reply;
         return  localdataStore;
     }
 
