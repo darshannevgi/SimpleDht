@@ -61,9 +61,9 @@ public class SimpleDhtActivity extends Activity {
             Cursor resultCursor = getContentResolver().query(mUri, null, params[0], null, null);
             resultCursor.moveToFirst();
            // Log.e(TAG, "Verifying GDUMP output");
-            while (resultCursor.moveToNext()) {
+            do {
                 Log.e(TAG, "Key: " + resultCursor.getString(resultCursor.getColumnIndex("key")) + " Value :" + resultCursor.getString(resultCursor.getColumnIndex("value")));
-            }
+            }while (resultCursor.moveToNext());
             return null;
         }
     }

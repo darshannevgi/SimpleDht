@@ -38,11 +38,18 @@ public class SimpleDhtProvider extends ContentProvider {
         // TODO Handle cases when there are only single node or 2 nodes
         String key,value;
         Log.e(TAG, "Inside Content Provider Insert");
-        handleDeleteMsg(selection);
-        return 0;
+        if(selection.contains("@"))
+            return deleteFromLocalDataStore();
+        else if(selection.contains("*"))
+        {
+            //MatrixCursor cursor = (MatrixCursor) stringToCursor(readFromLocalDataStore(),new MatrixCursor(new String[]{"key", "value"}));
+            return deleteFromAllDataStore(3+"*"+myPort);
+        }
+        else
+            return deleteDataItem(selection);
     }
 
-    @Override
+       @Override
     public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs,
                         String sortOrder) {
         // TODO Auto-generated method stub
@@ -74,7 +81,7 @@ public class SimpleDhtProvider extends ContentProvider {
         //Log.e(TAG, "Inside Content Provider Insert");
         key = (String)values.get("key");
         value = (String)values.get("value");
-        //Log.e(TAG, "Received Key = " + key + " Value=" + value);
+        ////Log.e(TAG, "Received Key = " + key + " Value=" + value);
         handleInsertMsg(key,value);
 
         return uri;
@@ -89,7 +96,7 @@ public class SimpleDhtProvider extends ContentProvider {
         String portStr = tel.getLine1Number().substring(tel.getLine1Number().length() - 4);
         myPort = (Integer.parseInt(portStr) * 2);
         try {
-            myPortHash = genHash(String.valueOf(myPort));
+            myPortHash = genHash(String.valueOf(myPort/2));
         } catch (NoSuchAlgorithmException e) {
             e.printStackTrace();
         }
@@ -123,13 +130,13 @@ public class SimpleDhtProvider extends ContentProvider {
         {
             predecessorPort = -1;
             successorPort= -1;
-            Log.e(TAG, "I am "+ myPort +  "With Hash Value =" + myPortHash );
+            //Log.e(TAG, "I am "+ myPort +  "With Hash Value =" + myPortHash );
         }
         else
         {
             //find correct position
             String msg = "0" + myPort;
-            Log.e(TAG, "My Port is " + myPort + "With Hash Value =" + myPortHash + "Sending Join Request to Avd0");
+            //Log.e(TAG, "My Port is " + myPort + "With Hash Value =" + myPortHash + "Sending Join Request to Avd0");
             new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,msg);
         }
         return true;
@@ -141,18 +148,84 @@ public class SimpleDhtProvider extends ContentProvider {
         return 0;
     }
 
-    private void handleDeleteMsg(String selection) {
+    private int deleteDataItem(String key) {
+        StringBuffer sb = new StringBuffer();
+        StringBuffer sbMain = new StringBuffer();
+        try {
+            if(isBelongTO(genHash(key))) {
+                File dir = getContext().getFilesDir();
+                for(File file: dir.listFiles())
+                    if (!file.isDirectory() && file.getName().equals(key))
+                        file.delete();
+                return 1;
+            }
+            else
+            {
+                //Log.e(TAG, "Still not found position..Forwarding Req to Successor");
+                Socket socket = null;
+                try {
+                    socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                            successorPort);
+                    PrintWriter pw = null;
+                    pw = new PrintWriter(socket.getOutputStream(), true);
+                    String msg = "3" + key;
+                    pw.println(msg);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        }
+        return 1;
     }
+
+    private int deleteFromAllDataStore(String msg) {
+        {
+            //Log.e(TAG, "Still not found position..Forwarding Req to Successor");
+            String reply = "";
+            int receiverPort = Integer.parseInt(msg.substring(2,7));
+            //Log.e(TAG, "Sending read Request to :" + successorPort + " From: " + myPort);
+            if(successorPort != -1 && successorPort != receiverPort)
+            {
+                Socket socket = null;
+                try {
+                    socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
+                            successorPort);
+                    BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                    PrintWriter pw = null;
+                    pw = new PrintWriter(socket.getOutputStream(), true);
+                    pw.println(msg);
+                    reply = in.readLine();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+            deleteFromLocalDataStore();
+            return  1;
+        }
+    }
+
+    private int deleteFromLocalDataStore() {
+        File dir = getContext().getFilesDir();
+        for(File file: dir.listFiles())
+            if (!file.isDirectory())
+                file.delete();
+            return 1;
+    }
+
+
 
     private  String readFromLocalDataStore()
     {
-        Log.e(TAG,"Inside readFromLocalDataStore..reading from local Data Store");
+        //Log.e(TAG,"Inside readFromLocalDataStore..reading from local Data Store");
         File file = getContext().getFilesDir();
         File[] files = file.listFiles();
+        if(files.length == 0)
+            return "";
         FileInputStream inputStream;
         StringBuffer sb = new StringBuffer();
         StringBuffer sbMain = new StringBuffer();
-        MatrixCursor cursor = new MatrixCursor(new String[]{"key", "value"});
         for (int j = 0; j < files.length; j++) {
             try {
                 inputStream = getContext().openFileInput(files[j].getName());
@@ -161,17 +234,17 @@ public class SimpleDhtProvider extends ContentProvider {
                 while ((i = inputStream.read()) != -1) {
                     sb.append((char) i);
                 }
-                Log.e(TAG,"Key: " + files[j].getName() + " Value: " +sb);
+                //Log.e(TAG,"Key: " + files[j].getName() + " Value: " +sb);
                 inputStream.close();
             } catch (Exception e) {
             }
-            sbMain.append(files[j].getName().length());
-            sbMain.append(files[j].getName());
-            sbMain.append(sb.length());
-            sbMain.append(sb);
+            sbMain.append(files[j].getName()+ "_");
+            sbMain.append(sb + "_");
             sb.setLength(0);
         }
-        Log.e(TAG,"Whole Local Store String: " + sbMain);
+        sbMain.setLength(sbMain.length()-1);
+        Log.e(TAG,"@ Result String before" + sbMain);
+        //Log.e(TAG,"Whole Local Store String: " + sbMain);
         return sbMain.toString();
     }
 
@@ -181,7 +254,7 @@ public class SimpleDhtProvider extends ContentProvider {
         StringBuffer sbMain = new StringBuffer();
         try {
             if(isBelongTO(genHash(key))) {
-                Log.e(TAG,"Inside findDataItem");
+                //Log.e(TAG,"Inside findDataItem");
                 MatrixCursor cursor = new MatrixCursor(new String[]{"key", "value"});
                 try {
                     FileInputStream inputStream;
@@ -193,11 +266,9 @@ public class SimpleDhtProvider extends ContentProvider {
                     inputStream.close();
                 } catch (Exception e) {
                 }
-                sbMain.append(key.length());
-                sbMain.append(key);
-                sbMain.append(sb.length());
+                sbMain.append(key + "_");
                 sbMain.append(sb);
-                Log.e(TAG,"Passsing String " +sbMain + " for Cursor Conversion");
+                Log.e(TAG,"@ Result Before " +sbMain);
                 return sbMain.toString();
             }
             else
@@ -210,7 +281,7 @@ public class SimpleDhtProvider extends ContentProvider {
                     BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
                     PrintWriter pw = null;
                     pw = new PrintWriter(socket.getOutputStream(), true);
-                    String msg = "2" + key.length()+ key;
+                    String msg = "2" + key;
                     pw.println(msg);
                     String reply = in.readLine();
                     return reply;
@@ -227,14 +298,23 @@ public class SimpleDhtProvider extends ContentProvider {
 
     private Cursor stringToCursor(String msg, MatrixCursor cursor)
     {
-        Log.e(TAG,"Inside stringToCursor");
-        int keylengthIndex = 0;
-        for (; keylengthIndex < msg.length(); ) {
+        //Log.e(TAG,"Inside stringToCursor");
+        Log.e(TAG,"@ Result String After" + msg);
+        if(msg == null || msg.equals(""))
+            return cursor;
+        String [] split =  msg.split("_");
+        for (int i = 0; i < split.length;) {
 
-            int keySize = Character.getNumericValue(msg.charAt(keylengthIndex)), keyStartIndex = keylengthIndex + 1, vallengthIndex = keyStartIndex+keySize;
+            /*int keySize = Character.getNumericValue(msg.charAt(keylengthIndex)), keyStartIndex = keylengthIndex + 1, vallengthIndex = keyStartIndex+keySize;
             int valSize = Character.getNumericValue(msg.charAt(vallengthIndex)),valStartIndex = vallengthIndex+1;
             keylengthIndex = valStartIndex + valSize;
             String key= msg.substring(keyStartIndex,keyStartIndex + keySize),value = msg.substring(valStartIndex, valStartIndex + valSize);
+           */
+            String key = split[i];
+            i++;
+            String value = split[i];
+            i++;
+            Log.e(TAG,"Key : " + key + " Value: " + value);
             cursor.newRow().add(key).add(value);
         }
         return cursor;
@@ -244,7 +324,7 @@ public class SimpleDhtProvider extends ContentProvider {
         //Log.e(TAG, "Still not found position..Forwarding Req to Successor");
         String reply = "";
         int receiverPort = Integer.parseInt(msg.substring(2,7));
-        Log.e(TAG, "Sending read Request to :" + successorPort + " From: " + myPort);
+        //Log.e(TAG, "Sending read Request to :" + successorPort + " From: " + myPort);
         if(successorPort != -1 && successorPort != receiverPort)
         {
             Socket socket = null;
@@ -261,26 +341,27 @@ public class SimpleDhtProvider extends ContentProvider {
             }
         }
         String localdataStore = readFromLocalDataStore();
-
-        return localdataStore+reply;
+        if(reply != "")
+            return localdataStore+ "_"+ reply;
+        return  localdataStore;
     }
 
     boolean isBelongTO(String idHash)
     {
         //Log.e(TAG,"New Node Hash = " + idHash + " My Hash =" + myPortHash+ " predcessorHash =" + predecessorPortHash + " SuccessorHash =" + successorPortHash);
-        if(successorPort == -1 || (idHash.compareTo(predecessorPortHash) > 0 && idHash.compareTo(myPortHash) < 1)
-                || (((predecessorPortHash.compareTo(myPortHash))) > 0 ) && (idHash.compareTo(predecessorPortHash) >0 || idHash.compareTo(myPortHash) < 1))
+        if((successorPort == -1) || (idHash.compareTo(predecessorPortHash) > 0 && idHash.compareTo(myPortHash) < 1)
+                || ((predecessorPortHash.compareTo(myPortHash) > 0 ) && (idHash.compareTo(predecessorPortHash) >0 || idHash.compareTo(myPortHash) < 1)))
             return true;
         else return false;
     }
 
     private void handleInsertMsg(String key, String value) {
         try {
-            Log.e(TAG, "Inside handleInsertMsg with Key :" + key + " Value: " + value);
+            //Log.e(TAG, "Inside handleInsertMsg with Key :" + key + " Value: " + value);
             if(isBelongTO(genHash(key)))
             {
                 FileOutputStream outputStream;
-                Log.e(TAG, "Found position..Inserting Key :" + key + " Value: " + value);
+                Log.e(TAG, "Inserting Key :" + key + " Value: " + value);
                 try {
                     outputStream = getContext().openFileOutput(key, Context.MODE_PRIVATE);
                    // Log.v("GroupMessengerActivity", "Opened File");
@@ -295,7 +376,7 @@ public class SimpleDhtProvider extends ContentProvider {
             }
             else
             {
-                //Log.e(TAG, "Still not found position..Forwarding Req to Successor");
+                //Log.e(TAG, "Forwarding Key " + key + "Value  " + value);
                 Socket socket = null;
                 try {
                     socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
@@ -303,7 +384,7 @@ public class SimpleDhtProvider extends ContentProvider {
                     BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
                     PrintWriter pw = null;
                     pw = new PrintWriter(socket.getOutputStream(), true);
-                    String msg = "1" + key.length()+ key+ value.length()+ value;
+                    String msg = "1" + key + "_"+ value;
                     pw.println(msg);
                 } catch (IOException e) {
                     e.printStackTrace();
@@ -342,32 +423,37 @@ public class SimpleDhtProvider extends ContentProvider {
                    // pw.println(msgToSend);
                     // Log.e(TAG, "Before Reading");
                     msg = br.readLine();
+                    if(msg == null)
+                        return null;
                     String reply;
                     if(msg.charAt(0) == '0')
                     {
                         //join msg
                        // Log.e(TAG, "Serving Join Request");
                         int id = Integer.parseInt(msg.substring(1,6));
-                        String idHash = genHash(id+"");
+                        String idHash = genHash(String.valueOf(id/2));
                         if(successorPort == -1)
                         {
                             //2 nd node is getting added;
                             successorPort = id;
-                            successorPortHash = genHash(String.valueOf(successorPort));
+                            successorPortHash = genHash(String.valueOf(successorPort/2));
                             predecessorPort = id;
-                            predecessorPortHash = genHash(String.valueOf(predecessorPort));
+                            predecessorPortHash = genHash(String.valueOf(predecessorPort/2));
                             reply = String.valueOf(myPort) + myPort;
-                           // Log.e(TAG, "Sending reply" + reply);
+                            //Log.e(TAG, "I am "+ myPort + " My Predecessor Changed to = " + predecessorPort +" Successor Changed to = " + successorPort);
+                            // Log.e(TAG, "Sending reply" + reply);
                         }
                         else if(isBelongTO(idHash))
                         {
                            // Log.e(TAG, "Found Position");
                         int oldpred = predecessorPort;
                         predecessorPort = id;
+                        predecessorPortHash = genHash(String.valueOf(predecessorPort/2));
                         reply = oldpred + String.valueOf(myPort);
                         Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
                                     oldpred);
                         String msgToSend = "4" + id;
+                        //Log.e(TAG, "I am "+ myPort + " My Predecessor Changed to = " + predecessorPort +" Successor Changed to = " + successorPort);
                         PrintWriter pw = new PrintWriter(socket.getOutputStream(), true);
                         pw.println(msgToSend);
                         }
@@ -389,11 +475,12 @@ public class SimpleDhtProvider extends ContentProvider {
                     }
                     else if(msg.charAt(0) == '1')
                     {
-                        int keylengthIndex = 1,keySize = Character.getNumericValue(msg.charAt(keylengthIndex)), keyStartIndex = keylengthIndex + 1, vallengthIndex = keyStartIndex+keySize;
+                        /*int keylengthIndex = 1,keySize = Character.getNumericValue(msg.charAt(keylengthIndex)), keyStartIndex = keylengthIndex + 1, vallengthIndex = keyStartIndex+keySize;
                         int valSize = Character.getNumericValue(msg.charAt(vallengthIndex)),valStartIndex = vallengthIndex+1;
                         String key= msg.substring(keyStartIndex,keyStartIndex + keySize),value = msg.substring(valStartIndex, valStartIndex + valSize);
-
-                        handleInsertMsg(key,value);
+*/
+                        String split[] = msg.substring(1).split("_");
+                        handleInsertMsg(split[0],split[1]);
                         //insert msg
 
                     }
@@ -407,7 +494,8 @@ public class SimpleDhtProvider extends ContentProvider {
                         }
                         else
                         {
-                            String key =  msg.substring(2,2+Character.getNumericValue(msg.charAt(1)));
+                            //String key =  msg.substring(2,2+Character.getNumericValue(msg.charAt(1)));
+                            String key =  msg.substring(1);
                             reply =findDataItem(key);
                             PrintWriter pwMain = new PrintWriter(client.getOutputStream(), true);
                             pwMain.println(reply);
@@ -417,14 +505,24 @@ public class SimpleDhtProvider extends ContentProvider {
                     }
                     else if(msg.charAt(0) == '3')
                     {
+                        if(msg.charAt(1) == '*')
+                        {
+                            deleteFromAllDataStore(msg);
+                        }
+                        else
+                        {
+                            //String key =  msg.substring(2,2+Character.getNumericValue(msg.charAt(1)));
+                            String key =  msg.substring(1);
+                            deleteDataItem(key);
+                        }
                     //delete msg
                     }
                     else if(msg.charAt(0) == '4')
                     {
                         //Successor Change
                         successorPort = Integer.parseInt(msg.substring(1,6));
-                        successorPortHash = genHash(String.valueOf(successorPort));
-                        Log.e(TAG, "I am "+ myPort + " My Predecessor = " + predecessorPort +" Successor = " + successorPort);
+                        successorPortHash = genHash(String.valueOf(successorPort/2));
+                        //Log.e(TAG, "I am "+ myPort + " My Predecessor Changed to = " + predecessorPort +" Successor Changed to = " + successorPort);
                     }
                     else
                     Log.e(TAG,"Wrong Message");
@@ -453,12 +551,12 @@ public class SimpleDhtProvider extends ContentProvider {
             PrintWriter pw = new PrintWriter(socket.getOutputStream(), true);
             pw.println(msgs[0]);
             inputLine= in.readLine();
-            Log.e(TAG,"Received Reply :" + inputLine);
+            //Log.e(TAG,"Received Reply :" + inputLine);
             predecessorPort = Integer.parseInt(inputLine.substring(0,5));
-            predecessorPortHash = genHash(String.valueOf(predecessorPort));
+            predecessorPortHash = genHash(String.valueOf(predecessorPort/2));
             successorPort = Integer.parseInt(inputLine.substring(5,10));
-            successorPortHash = genHash(String.valueOf(successorPort));
-            Log.e(TAG, "I am "+ myPort + " My Predecessor = " + predecessorPort +" Successor = " + successorPort);
+            successorPortHash = genHash(String.valueOf(successorPort/2));
+            //Log.e(TAG, "I am "+ myPort + " My Predecessor = " + predecessorPort +" Successor = " + successorPort);
 
         } catch (UnknownHostException e) {
                 Log.e(TAG, "ClientTask UnknownHostException");
